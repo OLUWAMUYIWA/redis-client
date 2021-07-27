@@ -1,36 +1,52 @@
-use crate::client;
+use std::{fmt::Write, ops::Deref};
 
+use crate::client;
+use bytes::{BufMut, Bytes, BytesMut};
+
+/// According to the Redis protocol spec, this union type defines the different types of responses in Redis
 pub(crate) enum Resp {
     SimpleString(String),
-    Error(Vec<u8>),
+    Error((String, String)),
     Integer(i64),
     BulkString(Vec<u8>),
     Array(Vec<Resp>),
 }
 
 impl Resp {
-    pub(crate) fn serialize(self, buf: &mut Vec<u8>) {
+    pub(crate) fn serialize(self, b: &mut BytesMut) {
         match self {
             Self::Array(vals) => {
-                buf.push(b"*"[0]);
-                buf.append(&mut format!("{:?}", vals.len()).into_bytes());
-                buf.push('\r' as u8);
-                buf.push('\n' as u8);
+                b.put_u8(b'*');
+                <BytesMut as BufMut>::put_u32( b, vals.len() as u32);
+                b.put_u8(b'\r');
+                b.put_u8(b"\n"[0]);
                 for val in vals {
-                    val.serialize(buf);
+                    val.serialize(b);
                 }
             }
             Self::BulkString(mut string) => {
-                buf.push(b'$');
-                buf.append(&mut format!("{:?}", string.len()).into_bytes());
-                buf.push('\r' as u8);
-                buf.push('\n' as u8);
-                buf.append(&mut &mut string);
-                buf.push('\r' as u8);
-                buf.push('\n' as u8);
+                b.put_u8(b'$');
+                <BytesMut as BufMut>::put_u32( b, string.len() as u32);
+                b.put_u8(b'\r');
+                b.put_u8('\n' as u8);
+                b.copy_from_slice(&string[..]);
+                b.copy_from_slice(&b"\r\n"[..]);
             }
-            _ => {
-                unimplemented!()
+            Self::SimpleString(string) => {
+                b.put_u8(b'+');
+                b.write_str(string.as_str());
+                b.copy_from_slice(&b"\r\n"[..]);
+            }
+            Self::Integer(i) => {
+                b.put_u8(b':');
+                b.put_i64(i);
+                b.copy_from_slice(&b"\r\n"[..]);
+            }
+            Self::Error((err_type, msg)) => {
+                b.put_u8(b'-');
+                b.copy_from_slice(err_type.as_bytes());
+                b.copy_from_slice(msg.as_bytes());
+                b.copy_from_slice(&b"\r\n"[..]);
             }
         }
     }

@@ -1,4 +1,5 @@
 use async_std::{io::prelude::WriteExt,io::prelude::ReadExt, net::{TcpStream, ToSocketAddrs}};
+use bytes::BytesMut;
 use std::io::Error as IoError;
 
 use crate::resp;
@@ -17,7 +18,6 @@ impl Client {
 	}
 
 	pub async fn set(&mut self, key: String, val: String) -> Result<(), Error>{
-		let mut buf = vec![];
 		let command = resp::Resp::Array(
 			vec![
 					resp::Resp::BulkString(b"set".to_vec()), 
@@ -25,21 +25,22 @@ impl Client {
 					resp::Resp::BulkString(val.into_bytes())
 				]
 			);
-		command.serialize(&mut buf);
-		self.stream.write_all(&mut buf).await?;
-		let num_bytes = self.stream.read(&mut buf).await?;
-		let res = resp::parse_resp(&buf[..num_bytes])?;
+		let mut b = BytesMut::new();
+		command.serialize(&mut b);
+		self.stream.write_all(&mut b).await?;
+		let num_bytes = self.stream.read(&mut b).await?;
+		let res = resp::parse_resp(&b[..num_bytes])?;
 		println!("{:?}", res);
 		Ok(())
 	}
 
 	pub async fn ping(&mut self) -> Result<(), IoError> {
-		let mut buf = vec![];
+		let mut b = BytesMut::new();
 		let command = resp::Resp::Array(vec![resp::Resp::BulkString(b"PING".to_vec())]);
-		command.serialize(&mut buf);
-		self.stream.write_all(&mut buf).await?;
-		let num_bytes = self.stream.read(&mut buf).await?;
-		let res = resp::parse_resp(&buf[..num_bytes])?;
+		command.serialize(&mut b);
+		self.stream.write_all(&mut b).await?;
+		let num_bytes = self.stream.read(&mut b).await?;
+		let res = resp::parse_resp(&b[..num_bytes])?;
 		println!("{:?}", res);
 		Ok(())
 	}
